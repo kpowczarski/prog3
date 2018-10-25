@@ -109,11 +109,12 @@ function loadTriangles() {
             currentDiff = inputTriangles[whichSet].material.diffuse;
             currentAmb = inputTriangles[whichSet].material.ambient;
             currentSpecular = inputTriangles[whichSet].material.specular;
-            currentNormals = inputTriangles[whichSet].normals;
+            
             currentN = inputTriangles[whichSet].material.n;
             // set up the vertex coord array
             for (whichSetVert=0; whichSetVert<inputTriangles[whichSet].vertices.length; whichSetVert++){
             	vtxToAdd = inputTriangles[whichSet].vertices[whichSetVert];
+            	currentNormals = inputTriangles[whichSet].normals[whichSetVert];
                 coordArray.push(vtxToAdd[0],vtxToAdd[1],vtxToAdd[2]);
                 diffuseArray.push(currentDiff[0], currentDiff[1], currentDiff[2]);
                 ambientArray.push(currentAmb[0], currentAmb[1], currentAmb[2]);
