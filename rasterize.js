@@ -299,7 +299,7 @@ function renderTriangles() {
     gl.vertexAttribPointer(normalsPositionAttrib,3,gl.FLOAT,false,0,0);
     
     gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
-    gl.vertexAttribPointer(nPositionAttrib,1,gl.FLOAT,false,0,0);
+    gl.vertexAttribPointer(nPositionAttrib,1,gl.SHORT,false,0,0);
 
     gl.drawElements(gl.TRIANGLES,triBufferSize,gl.UNSIGNED_SHORT, 0); // render
     
