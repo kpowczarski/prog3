@@ -7,7 +7,7 @@ const WIN_BOTTOM = 0; const WIN_TOP = 1;  // default top and bottom y coords in 
 const INPUT_TRIANGLES_URL = "https://ncsucgclass.github.io/prog2/triangles.json"; // triangles file loc
 const INPUT_SPHERES_URL = "https://ncsucgclass.github.io/prog2/spheres.json"; // spheres file loc
 var Eye = new vec3.fromValues(0.5,0.5,-0.5); // default eye position in world space
-var lookat = new vec3.fromValues(0,0,1);
+var lookat = new vec3.fromValues(.5,.5,1);
 var viewup = new vec3.fromValues(0,1,0);
 
 /* webgl globals */
@@ -27,6 +27,22 @@ var normalsBuffer;
 var normalsPositionAttrib;
 var nBuffer;
 var nPositionAttrib;
+var originBuffer;
+var originPositionAttrib;
+var selectionBuffer;
+var selectionPositionAttrib;
+var key;
+var diffuseArray = [];
+var ambientArray = [];
+var specularArray = [];
+var normalsArray = [];
+var nArray = [];
+var numberOfSets;
+var selection = [];
+var setArray = [];
+var currentS = -1;
+var orgArray = [];
+var translateMatrix;
 
 
 // ASSIGNMENT HELPER FUNCTIONS
@@ -89,11 +105,6 @@ function loadTriangles() {
         var whichSetTri; // index of triangle in current triangle set
         var coordArray = []; // 1D array of vertex coords for WebGL
         var indexArray = [];
-        var diffuseArray = [];
-        var ambientArray = [];
-        var specularArray = [];
-        var normalsArray = [];
-        var nArray = [];
         var vtxBufferSize = 0;
         var vtxToAdd = [];
         var indexOffset = vec3.create();
@@ -103,16 +114,21 @@ function loadTriangles() {
         var currentSpecular;
         var currentNormals;
         var currentN;
+        var curO = [];
         
         for (var whichSet=0; whichSet<inputTriangles.length; whichSet++) {
+        	setArray.push([]);
             vec3.set(indexOffset, vtxBufferSize, vtxBufferSize, vtxBufferSize);
             currentDiff = inputTriangles[whichSet].material.diffuse;
             currentAmb = inputTriangles[whichSet].material.ambient;
             currentSpecular = inputTriangles[whichSet].material.specular;
-            
+            numberOfSets = inputTriangles.length;
             currentN = inputTriangles[whichSet].material.n;
+            cur0 = [0,0,0];
             // set up the vertex coord array
             for (whichSetVert=0; whichSetVert<inputTriangles[whichSet].vertices.length; whichSetVert++){
+            	setArray[whichSet].push(0);
+            	selection.push(0);
             	vtxToAdd = inputTriangles[whichSet].vertices[whichSetVert];
             	currentNormals = inputTriangles[whichSet].normals[whichSetVert];
                 coordArray.push(vtxToAdd[0],vtxToAdd[1],vtxToAdd[2]);
@@ -121,6 +137,7 @@ function loadTriangles() {
                 specularArray.push(currentSpecular[0], currentSpecular[1], currentSpecular[2]);
                 normalsArray.push(currentNormals[0], currentNormals[1], currentNormals[2]);
                 nArray.push(currentN);
+                cur0 = [cur0[0] + vtxToAdd[0], cur0[1] + vtxToAdd[1], cur0[2] + vtxToAdd[2] ];
                 // console.log(inputTriangles[whichSet].vertices[whichSetVert]);
             }
             for (whichSetTri=0; whichSetTri<inputTriangles[whichSet].triangles.length; whichSetTri++) {
@@ -129,6 +146,13 @@ function loadTriangles() {
             }
             vtxBufferSize += inputTriangles[whichSet].vertices.length; // total number of vertices
             triBufferSize += inputTriangles[whichSet].triangles.length; // total number of tris
+            for (var j = 0; j < 3; j++) {
+            	curO[j] = cur0[j] / inputTriangles[whichSet].vertices.length;
+            }
+            for (whichSetVert=0; whichSetVert<inputTriangles[whichSet].vertices.length; whichSetVert++){
+            	orgArray.push(cur0[0], cur0[1], cur0[2]);
+            }
+            
         } // end for each triangle set
         triBufferSize *= 3;
         // console.log(coordArray.length);
@@ -161,6 +185,16 @@ function loadTriangles() {
         gl.bindBuffer(gl.ARRAY_BUFFER,nBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Uint16Array(nArray), gl.STATIC_DRAW);
         
+        selectionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER,selectionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normalsArray), gl.STATIC_DRAW);
+        
+        originBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER,originBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(selection), gl.STATIC_DRAW);
+        
+        
+        
     } // end if triangles found
 } // end load triangles
 
@@ -192,20 +226,23 @@ function setupShaders() {
         attribute vec3 specularColor;
         attribute vec3 normal;
         attribute float n;
+        attribute vec3 origin;
+        attribute vec3 selection;
         
         varying vec4 vColor;
     	
     	uniform vec3 eye;
     	uniform vec3 light;
     	uniform mat4 lookAt;
-    	uniform mat4 perspective;
+    	uniform mat4 frust;
+    	uniform mat4 scale;
     	
 
         void main(void) {
-            gl_Position = perspective * lookAt * vec4(vertexPosition, 1.0); // use the untransformed position
+            gl_Position = frust * lookAt * vec4(vertexPosition, 1.0); // use the untransformed position
           	vec3 lightV = normalize(light - vertexPosition);
           	vec3 viewV = normalize(eye - vertexPosition); 
-          	vec3 hV = viewV + lightV / normalize(viewV) - normalize(lightV);
+          	vec3 hV = normalize(viewV + lightV);
           	vec3 diffC = diffuseColor * dot(normal, lightV);
           	vec3 ambC = ambientColor;
           	vec3 specC = specularColor * pow(dot(normal, hV), n); 
@@ -247,25 +284,32 @@ function setupShaders() {
                 specularPositionAttrib = gl.getAttribLocation(shaderProgram, "specularColor");
                 normalsPositionAttrib = gl.getAttribLocation(shaderProgram, "normal");
                 nPositionAttrib = gl.getAttribLocation(shaderProgram, "n");
+                originPositionAttrib = gl.getAttribLocation(shaderProgram, "origin");
+                selectionPositionAttrib = gl.getAttribLocation(shaderProgram, "selection");
                 gl.enableVertexAttribArray(vertexPositionAttrib); // input to shader from array
                 gl.enableVertexAttribArray(diffusePositionAttrib);
                 gl.enableVertexAttribArray(ambientPositionAttrib);
                 gl.enableVertexAttribArray(specularPositionAttrib);
                 gl.enableVertexAttribArray(normalsPositionAttrib);
                 gl.enableVertexAttribArray(nPositionAttrib);
+                gl.enableVertexAttribArray(originPositionAttrib);
+                gl.enableVertexAttribArray(selectionPositionAttrib);
                 var eye = gl.getUniformLocation(shaderProgram, "eye");
                 gl.uniform3f(eye, Eye[0], Eye[1], Eye[2]);
                 var light = gl.getUniformLocation(shaderProgram, "light");
                 gl.uniform3f(light, -3.0, 1.0, -0.5);
+                //debugger;
                 var lookAtn = gl.getUniformLocation(shaderProgram, "lookAt");
                 var lookAtMat = mat4.create();
-                var o = vec3.fromValues(.5,.5,.5);
-                mat4.lookAt(lookAtMat, eye,lookat, viewup);
+                //var o = vec3.fromValues(.5,.5,.5);
+                mat4.lookAt(lookAtMat, Eye,lookat, viewup);
                 gl.uniformMatrix4fv(lookAtn, false, lookAtMat);
-                var perspective = gl.getUniformLocation(shaderProgram, "perspective");
+                var frust = gl.getUniformLocation(shaderProgram, "frust");
                 var frus = mat4.create();
                 mat4.frustum(frus, -1, 1, -1, 1, 1, 10);
-                gl.uniformMatrix4fv(perspective, false, frus);
+                gl.uniformMatrix4fv(frust, false, frus);
+                var scal = gl.getUniformLocation(shaderProgram, "scale");
+                var scalM = mat4.create();
                 
             } // end if no shader program link errors
         } // end if no compile errors
@@ -280,6 +324,8 @@ function setupShaders() {
 function renderTriangles() {
 	setupShaders();
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // clear frame/depth buffers
+    keyPressedMovement();
+    key = null;
     requestAnimationFrame(renderTriangles);
     // vertex buffer: activate and feed into vertex shader
     gl.bindBuffer(gl.ARRAY_BUFFER,vertexBuffer); // activate
@@ -288,23 +334,103 @@ function renderTriangles() {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffer);
     
     gl.bindBuffer(gl.ARRAY_BUFFER, diffuseBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(diffuseArray), gl.STATIC_DRAW);
     gl.vertexAttribPointer(diffusePositionAttrib,3,gl.FLOAT,false,0,0);
     
     gl.bindBuffer(gl.ARRAY_BUFFER, ambientBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(ambientArray), gl.STATIC_DRAW);
     gl.vertexAttribPointer(ambientPositionAttrib,3,gl.FLOAT,false,0,0);
     
     gl.bindBuffer(gl.ARRAY_BUFFER, specularBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(specularArray), gl.STATIC_DRAW);
     gl.vertexAttribPointer(specularPositionAttrib,3,gl.FLOAT,false,0,0);
     
     gl.bindBuffer(gl.ARRAY_BUFFER, normalsBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normalsArray), gl.STATIC_DRAW);
     gl.vertexAttribPointer(normalsPositionAttrib,3,gl.FLOAT,false,0,0);
     
     gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Uint16Array(nArray), gl.STATIC_DRAW);
     gl.vertexAttribPointer(nPositionAttrib,1,gl.SHORT,false,0,0);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, originBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(orgArray), gl.STATIC_DRAW);
+    gl.vertexAttribPointer(originPositionAttrib,3,gl.FLOAT,false,0,0);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, selectionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(selection), gl.STATIC_DRAW);
+    gl.vertexAttribPointer(selectionPositionAttrib,3,gl.FLOAT,false,0,0);
 
     gl.drawElements(gl.TRIANGLES,triBufferSize,gl.UNSIGNED_SHORT, 0); // render
     
 } // end render triangles
+
+function keyPressedMovement() {
+	if (key == "a") {
+		var a = vec3.fromValues( -0.1, 0, 0);
+		vec3.add(Eye, Eye, a);
+		vec3.add(lookat, lookat, a);
+	}
+	if (key == "d") {
+		var d = vec3.fromValues(0.1, 0, 0);
+		vec3.add(Eye, Eye, d);
+		vec3.add(lookat, lookat, d);
+	}
+	if (key == "w") {
+		var a = vec3.fromValues( 0, 0, -0.1);
+		vec3.add(Eye, Eye, a);
+		vec3.add(lookat, lookat, a);
+	}
+	if (key == "s") {
+		var d = vec3.fromValues(0, 0, 0.1);
+		vec3.add(Eye, Eye, d);
+		vec3.add(lookat, lookat, d);
+	}
+	if (key == "q") {
+		var a = vec3.fromValues( 0, -0.1, 0);
+		vec3.add(Eye, Eye, a);
+		vec3.add(lookat, lookat, a);
+	}
+	if (key == "e") {
+		var d = vec3.fromValues(0, 0.1, 0);
+		vec3.add(Eye, Eye, d);
+		vec3.add(lookat, lookat, d);
+	}
+	if (key == "A") {
+		var a = vec3.fromValues( -0.1, 0, 0);
+		vec3.add(lookat, lookat, a);
+	}
+	if (key == "D") {
+		var d = vec3.fromValues( 0.1, 0, 0);
+		vec3.add(lookat, lookat, d);
+	}
+	if (key == "W") {
+		var a = vec3.fromValues(0,  -0.1, 0);
+		vec3.add(lookat, lookat, a);
+	}
+	if (key == "S") {
+		var d = vec3.fromValues(0, 0.1, 0);
+		vec3.add(lookat, lookat, d);
+	}
+	if (key == "ArrowLeft") {
+		if (currentS == -1) {
+			currentS = setArray.length - 1;
+		}
+		else {
+			currentS = currentS - 1;
+			if (currentS < 0) {
+				currentS = setArray.length - 1;
+			}
+		}
+		
+		select();
+	}
+	if (key == "ArrowRight") {
+		currentS = (currentS + 1) % (setArray.length);
+		select();
+	}
+}
+
 
 	
 /* MAIN -- HERE is where execution begins after window load */
@@ -316,3 +442,10 @@ function main() {
   renderTriangles(); // draw the triangles using webGL;
   
 } // end main
+
+
+$(document).keydown( function(e) {
+	key = e.key;
+	console.log(key);
+	
+});
