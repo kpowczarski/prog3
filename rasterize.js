@@ -43,6 +43,11 @@ var setArray = [];
 var currentS = -1;
 var orgArray = [];
 var translateMatrix;
+var woBlin = 0;
+var moveT = vec3.fromValues(0,0,0);
+var xR = 0;
+var yR = 0;
+var zR = 0;
 
 
 // ASSIGNMENT HELPER FUNCTIONS
@@ -124,7 +129,7 @@ function loadTriangles() {
             currentSpecular = inputTriangles[whichSet].material.specular;
             numberOfSets = inputTriangles.length;
             currentN = inputTriangles[whichSet].material.n;
-            cur0 = [0,0,0];
+            curO = [0,0,0];
             // set up the vertex coord array
             for (whichSetVert=0; whichSetVert<inputTriangles[whichSet].vertices.length; whichSetVert++){
             	setArray[whichSet].push(0);
@@ -137,7 +142,7 @@ function loadTriangles() {
                 specularArray.push(currentSpecular[0], currentSpecular[1], currentSpecular[2]);
                 normalsArray.push(currentNormals[0], currentNormals[1], currentNormals[2]);
                 nArray.push(currentN);
-                cur0 = [cur0[0] + vtxToAdd[0], cur0[1] + vtxToAdd[1], cur0[2] + vtxToAdd[2] ];
+                curO = [curO[0] + vtxToAdd[0], curO[1] + vtxToAdd[1], curO[2] + vtxToAdd[2] ];
                 // console.log(inputTriangles[whichSet].vertices[whichSetVert]);
             }
             for (whichSetTri=0; whichSetTri<inputTriangles[whichSet].triangles.length; whichSetTri++) {
@@ -147,10 +152,10 @@ function loadTriangles() {
             vtxBufferSize += inputTriangles[whichSet].vertices.length; // total number of vertices
             triBufferSize += inputTriangles[whichSet].triangles.length; // total number of tris
             for (var j = 0; j < 3; j++) {
-            	curO[j] = cur0[j] / inputTriangles[whichSet].vertices.length;
+            	curO[j] = curO[j] / inputTriangles[whichSet].vertices.length;
             }
             for (whichSetVert=0; whichSetVert<inputTriangles[whichSet].vertices.length; whichSetVert++){
-            	orgArray.push(cur0[0], cur0[1], cur0[2]);
+            	orgArray.push(curO[0], curO[1], curO[2]);
             }
             
         } // end for each triangle set
@@ -185,13 +190,14 @@ function loadTriangles() {
         gl.bindBuffer(gl.ARRAY_BUFFER,nBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Uint16Array(nArray), gl.STATIC_DRAW);
         
-        selectionBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER,selectionBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normalsArray), gl.STATIC_DRAW);
-        
         originBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER,originBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(orgArray), gl.STATIC_DRAW);
+        
+        selectionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER,selectionBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(selection), gl.STATIC_DRAW);
+        
         
         
         
@@ -227,25 +233,44 @@ function setupShaders() {
         attribute vec3 normal;
         attribute float n;
         attribute vec3 origin;
-        attribute vec3 selection;
-        
+        attribute float selection;
         varying vec4 vColor;
-    	
     	uniform vec3 eye;
     	uniform vec3 light;
     	uniform mat4 lookAt;
     	uniform mat4 frust;
     	uniform mat4 scale;
+    	uniform float switchL;
+    	uniform mat4 translate;
+    	uniform mat4 rotate;
     	
 
         void main(void) {
-            gl_Position = frust * lookAt * vec4(vertexPosition, 1.0); // use the untransformed position
+        	float ox = origin.x;
+        	float oy = origin.y;
+        	float oz = origin.z;
+        	mat4 toOrigin = mat4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -ox, -oy, -oz, 1);
+        	mat4 awayOrigin = mat4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, ox, oy, oz, 1);
+            if (selection == 1.0) {
+            	gl_Position = frust * lookAt * translate * awayOrigin * scale * rotate * toOrigin * vec4(vertexPosition, 1.0);
+            }
+           	else {
+            	gl_Position = frust * lookAt * vec4(vertexPosition, 1.0); // use the untransformed position
+            }
           	vec3 lightV = normalize(light - vertexPosition);
           	vec3 viewV = normalize(eye - vertexPosition); 
           	vec3 hV = normalize(viewV + lightV);
           	vec3 diffC = diffuseColor * dot(normal, lightV);
           	vec3 ambC = ambientColor;
-          	vec3 specC = specularColor * pow(dot(normal, hV), n); 
+          	vec3 specC;
+          	if (switchL == 1.0) {
+          		vec3 r = (2.0 * dot(normal, lightV) * normal) - lightV;
+          		r = normalize(r);
+          		specC = specularColor * pow(dot(r, viewV), n); 
+          	} 
+          	else {
+          		specC = specularColor * pow(dot(normal, hV), n);
+          	} 
           	vColor = vec4(diffC + ambC + specC, 1.0);
             
         }
@@ -278,7 +303,7 @@ function setupShaders() {
                 throw "error during shader program linking: " + gl.getProgramInfoLog(shaderProgram);
             } else { // no shader program link errors
                 gl.useProgram(shaderProgram); // activate shader program (frag and vert)
-                vertexPositionAttrib = gl.getAttribLocation(shaderProgram, "vertexPosition"); // get pointer to vertex shader input
+                vertexPositionAttrib = gl.getAttribLocation(shaderProgram, "vertexPosition");
                 diffusePositionAttrib = gl.getAttribLocation(shaderProgram, "diffuseColor");
                 ambientPositionAttrib = gl.getAttribLocation(shaderProgram, "ambientColor");
                 specularPositionAttrib = gl.getAttribLocation(shaderProgram, "specularColor");
@@ -286,7 +311,7 @@ function setupShaders() {
                 nPositionAttrib = gl.getAttribLocation(shaderProgram, "n");
                 originPositionAttrib = gl.getAttribLocation(shaderProgram, "origin");
                 selectionPositionAttrib = gl.getAttribLocation(shaderProgram, "selection");
-                gl.enableVertexAttribArray(vertexPositionAttrib); // input to shader from array
+                gl.enableVertexAttribArray(vertexPositionAttrib);
                 gl.enableVertexAttribArray(diffusePositionAttrib);
                 gl.enableVertexAttribArray(ambientPositionAttrib);
                 gl.enableVertexAttribArray(specularPositionAttrib);
@@ -310,7 +335,20 @@ function setupShaders() {
                 gl.uniformMatrix4fv(frust, false, frus);
                 var scal = gl.getUniformLocation(shaderProgram, "scale");
                 var scalM = mat4.create();
-                
+                mat4.scale(scalM, scalM, vec3.fromValues( 1.2, 1.2, 1.2));
+                gl.uniformMatrix4fv(scal, false, scalM);
+                var switchL = gl.getUniformLocation(shaderProgram, "switchL");
+                gl.uniform1f(switchL, woBlin);
+                var trans = gl.getUniformLocation(shaderProgram, "translate");
+                var transM = mat4.create();
+                mat4.translate(transM, transM, moveT);
+                gl.uniformMatrix4fv(trans, false, transM);
+                var rot = gl.getUniformLocation(shaderProgram, "rotate");
+                var rotM = mat4.create();
+                mat4.rotateX(rotM, rotM, xR);
+                mat4.rotateZ(rotM, rotM, zR);
+                mat4.rotateY(rotM, rotM, yR);
+                gl.uniformMatrix4fv(rot, false, rotM);
             } // end if no shader program link errors
         } // end if no compile errors
     } // end try 
@@ -359,11 +397,41 @@ function renderTriangles() {
     
     gl.bindBuffer(gl.ARRAY_BUFFER, selectionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(selection), gl.STATIC_DRAW);
-    gl.vertexAttribPointer(selectionPositionAttrib,3,gl.FLOAT,false,0,0);
+    gl.vertexAttribPointer(selectionPositionAttrib,1,gl.FLOAT,false,0,0);
 
     gl.drawElements(gl.TRIANGLES,triBufferSize,gl.UNSIGNED_SHORT, 0); // render
     
 } // end render triangles
+
+$(document).keydown( function(k) {
+	key = k.key;
+	
+});
+
+function select() {
+	moveT = vec3.fromValues(0,0,0);
+	xR = 0;
+	yR = 0;
+	zR = 0;
+	for (var i = 0; i < setArray.length; i++) {
+		for (var j = 0; j < setArray[i].length; j++) {
+			if (currentS == i) {
+				setArray[i][j] = 1.0;
+			}
+			else {
+				setArray[i][j] = 0;
+			}
+		}
+	}
+	var beginning = 0;
+	for (var i = 0; i < setArray.length; i++) {
+		for (var j = 0; j < setArray[i].length; j++) {
+			selection[beginning] = setArray[i][j];
+			beginning++;
+		}
+	}
+	
+}
 
 function keyPressedMovement() {
 	if (key == "a") {
@@ -429,6 +497,181 @@ function keyPressedMovement() {
 		currentS = (currentS + 1) % (setArray.length);
 		select();
 	}
+	if (key == " ") {
+		currentS = -1;
+		select();
+	}
+	if (key == "b") {
+		if (woBlin == 0) {
+			woBlin = 1;
+		}
+		else {
+			woBlin = 0;
+		}
+	}
+	if (key == "n") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				nArray[i] += 1;
+				if (nArray[i] > 20) {
+					nArray[i] = 0;
+				}
+			}
+		}
+	}
+	if (key == "1") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var index1 = i * 3;
+				var index2 = i * 3 + 1;
+				var index3 = i * 3 + 2;
+				ambientArray[index1] += .1;
+				ambientArray[index2] += .1;
+				ambientArray[index3] += .1;
+				if (ambientArray[index1] > 1) {
+					ambientArray[index1] = 0;
+				}
+				if (ambientArray[index2] > 1) {
+					ambientArray[index2] = 0;
+				}
+				if (ambientArray[index3] > 1) {
+					ambientArray[index3] = 0;
+				}
+			}
+		}
+	}
+	if (key == "2") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var index1 = i * 3;
+				var index2 = i * 3 + 1;
+				var index3 = i * 3 + 2;
+				diffuseArray[index1] += .1;
+				diffuseArray[index2] += .1;
+				diffuseArray[index3] += .1;
+				if (diffuseArray[index1] > 1) {
+					diffuseArray[index1] = 0;
+				}
+				if (diffuseArray[index2] > 1) {
+					diffuseArray[index2] = 0;
+				}
+				if (diffuseArray[index3] > 1) {
+					diffuseArray[index3] = 0;
+				}
+			}
+		}
+	}
+	if (key == "3") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var index1 = i * 3;
+				var index2 = i * 3 + 1;
+				var index3 = i * 3 + 2;
+				specularArray[index1] += .1;
+				specularArray[index2] += .1;
+				specularArray[index3] += .1;
+				if (specularArray[index1] > 1) {
+					specularArray[index1] = 0;
+				}
+				if (specularArray[index2] > 1) {
+					specularArray[index2] = 0;
+				}
+				if (specularArray[index3] > 1) {
+					specularArray[index3] = 0;
+				}
+			}
+		}
+	}
+	if (key == "k") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var add = vec3.fromValues(0.1, 0, 0);
+				vec3.add(moveT, moveT, add);
+			}
+		}
+	}
+	if (key == ";") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var add = vec3.fromValues(-0.1, 0, 0);
+				vec3.add(moveT, moveT, add);
+			}
+		}
+	}
+	if (key == "l") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var add = vec3.fromValues(0, 0, 0.1);
+				vec3.add(moveT, moveT, add);
+			}
+		}
+	}
+	if (key == "o") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var add = vec3.fromValues(0, 0, -0.1);
+				vec3.add(moveT, moveT, add);
+			}
+		}
+	}
+	if (key == "i") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var add = vec3.fromValues(0, 0.1, 0);
+				vec3.add(moveT, moveT, add);
+			}
+		}
+	}
+	if (key == "p") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				var add = vec3.fromValues(0, -0.1, 0);
+				vec3.add(moveT, moveT, add);
+			}
+		}
+	}
+	if (key == "K") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				yR += .1;
+			}
+		}
+	}
+	if (key == ":") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				yR -= .1;
+			}
+		}
+	}
+	if (key == "L") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				xR += .1;
+			}
+		}
+	}
+	if (key == "O") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				xR -= .1;
+			}
+		}
+	}
+	if (key == "I") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				zR -= .1;
+			}
+		}
+	}
+	if (key == "P") {
+		for (var i = 0; i < selection.length; i++ ) {
+			if (selection[i] == 1.0) {
+				zR += .1;
+			}
+		}
+	}
 }
 
 
@@ -438,14 +681,6 @@ function keyPressedMovement() {
 function main() {
   setupWebGL(); // set up the webGL environment
   loadTriangles(); // load in the triangles from tri file
-  //setupShaders(); // setup the webGL shaders
   renderTriangles(); // draw the triangles using webGL;
   
 } // end main
-
-
-$(document).keydown( function(e) {
-	key = e.key;
-	console.log(key);
-	
-});
